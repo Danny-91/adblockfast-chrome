@@ -1,11 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Adblock Fast",
   "version": "1.9.0",
   "description": "The world’s fastest ad blocker! Same blocking, 8x more accelerated page loading.",
   "icons": { "16": "images/16.png", "48": "images/48.png", "128": "images/128.png" },
   "permissions": [
-    "<all_urls>",
     "browsingData",
     "contextMenus",
     "notifications",
@@ -13,20 +12,20 @@
     "tabs",
     "unlimitedStorage",
     "webNavigation",
-    "webRequest",
-    "webRequestBlocking"
+    "webRequest"
   ],
+  "host_permissions": ["<all_urls>"],
   "background": {
-    "scripts": [ "scripts/utils.js", "scripts/blocking.js", "scripts/background.js" ]
+    "service_worker": "scripts/background.js"
   },
   "content_scripts": [{
-    "matches": [ "<all_urls>" ],
-    "css": [ "stylesheets/content.css" ],
-    "js": [ "scripts/utils.js", "scripts/blocking.js", "scripts/hiding.js", "scripts/content.js" ],
+    "matches": ["<all_urls>"],
+    "css": ["stylesheets/content.css"],
+    "js": ["scripts/utils.js", "scripts/blocking.js", "scripts/hiding.js", "scripts/content.js"],
     "run_at": "document_start",
     "all_frames": true
   }],
-  "browser_action": {
+  "action": {
     "default_icon": { "19": "images/blocked/19.png", "38": "images/blocked/38.png" },
     "default_title": "Unblock ads on this site"
   }

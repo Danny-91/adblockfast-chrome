@@ -1,5 +1,5 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Adblock Fast",
   "version": "1.4.1",
   "description": "The world’s fastest ad blocker! Same blocking, 8x more accelerated page loading.",
@@ -26,19 +26,15 @@
     "tabs",
     "unlimitedStorage",
     "webNavigation",
-    "webRequest",
-    "webRequestBlocking",
-    "http://*/*",
-    "https://*/*"
+    "webRequest"
   ],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "background": {
-    "scripts": [
-      "chrome/scripts/utils.js", "chrome/scripts/blocking.js", "chrome/scripts/background.js"
-    ]
+    "service_worker": "chrome/scripts/background.js"
   },
   "content_scripts": [{
-    "matches": [ "http://*/*", "https://*/*" ],
-    "css": [ "chrome/stylesheets/content.css" ],
+    "matches": ["http://*/*", "https://*/*"],
+    "css": ["chrome/stylesheets/content.css"],
     "js": [
       "chrome/scripts/utils.js",
       "chrome/scripts/blocking.js",
@@ -48,7 +44,7 @@
     "run_at": "document_start",
     "all_frames": true
   }],
-  "browser_action": {
+  "action": {
     "default_icon": { "19": "chrome/images/blocked/19.png", "38": "chrome/images/blocked/38.png" },
     "default_title": "Unblock ads on this site"
   }

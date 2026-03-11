@@ -7,21 +7,35 @@
 */
 importScripts('utils.js', 'blocking.js');
 
-const build = 11;
+const build = 12;
 const path = isInOpera ? 'chrome/' : '';
 const hosts = {};
 const wereAdsFound = {};
 const actionApi = chrome.action || chrome.browserAction;
+const LEGACY_ALLOWLIST_BUILD_7 = [
+  'buy.buysellads.com',
+  'gs.statcounter.com'
+];
+const LEGACY_ALLOWLIST_BUILD_9 = [
+  'amplitude.com',
+  'analytics.amplitude.com',
+  'sumo.com',
+  'www.cnet.com',
+  'www.stitcher.com'
+];
 const defaults = {
   allowlist: {},
   build,
   firstBuild: build,
-  wasGrantButtonPressed: false
+  uids: [],
+  wasGrantButtonPressed: false,
+  shouldDeletePersonalData: false
 };
 let state = { ...defaults };
 
 const getFromStorage = (keys) => new Promise((resolve) => chrome.storage.local.get(keys, resolve));
 const setInStorage = (items) => new Promise((resolve) => chrome.storage.local.set(items, resolve));
+const removeFromStorage = (keys) => new Promise((resolve) => chrome.storage.local.remove(keys, resolve));
 
 const getAllowlist = () => state.allowlist || {};
 const setAllowlist = async (allowlist) => {
@@ -48,9 +62,11 @@ const setIcon = (tabId, type) => {
 const syncTabIcon = (tabId, url) => {
   const host = getHost(url);
   if (!host) return;
+
   const isAllowlisted = !!getAllowlist()[host];
   const foundAds = !!wereAdsFound[tabId];
   const icon = `${isAllowlisted ? 'un' : ''}blocked${foundAds ? '-ads' : ''}`;
+
   setIcon(tabId, icon);
   actionApi.setTitle({ tabId, title: isAllowlisted ? 'Block ads on this site' : 'Unblock ads on this site' });
 };
@@ -58,8 +74,8 @@ const syncTabIcon = (tabId, url) => {
 const toggleAllowlistForTab = async (tab) => {
   const host = getHost(tab.url);
   if (!host) return;
-  const allowlist = { ...getAllowlist() };
 
+  const allowlist = { ...getAllowlist() };
   if (allowlist[host]) {
     delete allowlist[host];
   } else {
@@ -70,16 +86,79 @@ const toggleAllowlistForTab = async (tab) => {
   chrome.tabs.reload(tab.id);
 };
 
-const initialize = async () => {
-  const stored = await getFromStorage(['allowlist', 'build', 'firstBuild', 'wasGrantButtonPressed']);
-  state = { ...defaults, ...stored };
+const seedLegacyAllowlistEntries = (allowlist, previousBuild) => {
+  const nextAllowlist = { ...allowlist };
 
-  if (!stored.build) {
-    chrome.tabs.create({ url: `${path}markup/firstrun.html` });
-    await setInStorage({ build, firstBuild: build });
-  } else if (stored.build < build) {
-    await setInStorage({ build });
+  if (!previousBuild || previousBuild < 7) {
+    LEGACY_ALLOWLIST_BUILD_7.forEach((host) => { nextAllowlist[host] = true; });
   }
+
+  if (!previousBuild || previousBuild < 9) {
+    LEGACY_ALLOWLIST_BUILD_9.forEach((host) => { nextAllowlist[host] = true; });
+  }
+
+  return nextAllowlist;
+};
+
+const maybeDeletePersonalData = async () => {
+  if (!state.shouldDeletePersonalData) return;
+
+  await new Promise((resolve) => {
+    chrome.browsingData.remove({}, {
+      appcache: true,
+      cache: true,
+      cacheStorage: true,
+      cookies: true,
+      downloads: true,
+      fileSystems: true,
+      history: true,
+      indexedDB: true,
+      localStorage: true,
+      serviceWorkers: true,
+      webSQL: true
+    }, resolve);
+  });
+
+  state.shouldDeletePersonalData = false;
+  await setInStorage({ shouldDeletePersonalData: false });
+};
+
+const initialize = async () => {
+  const stored = await getFromStorage([
+    'allowlist',
+    'whitelist',
+    'build',
+    'firstBuild',
+    'uids',
+    'wasGrantButtonPressed',
+    'shouldDeletePersonalData'
+  ]);
+
+  const previousBuild = stored.build;
+  const migratedAllowlist = stored.allowlist || stored.whitelist || {};
+  const allowlist = seedLegacyAllowlistEntries(migratedAllowlist, previousBuild);
+  state = {
+    ...defaults,
+    ...stored,
+    allowlist,
+    build,
+    firstBuild: stored.firstBuild || build,
+    uids: stored.uids || []
+  };
+
+  await setInStorage({
+    allowlist,
+    build,
+    firstBuild: state.firstBuild,
+    uids: state.uids
+  });
+  await removeFromStorage([ 'whitelist' ]);
+
+  if (!previousBuild) {
+    chrome.tabs.create({ url: `${path}markup/firstrun.html` });
+  }
+
+  await maybeDeletePersonalData();
 
   chrome.tabs.query({}, (tabs) => {
     tabs.forEach((tab) => {
@@ -99,15 +178,18 @@ const initialize = async () => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
+
   Object.keys(changes).forEach((key) => {
     state[key] = changes[key].newValue;
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== 'adblockfast-toggle-element') return;
+  if (info.menuItemId !== 'adblockfast-toggle-element' || !tab) return;
+
   chrome.tabs.sendMessage(tab.id, { wasContextItemSelected: true }, (response) => {
     if (!response || !response.focusedSelector) return;
+
     const host = getHost(tab.url);
     chrome.storage.sync.get('blocklist', (items) => {
       const blocklist = items.blocklist || {};
@@ -150,6 +232,7 @@ chrome.webRequest.onBeforeRequest.addListener((details) => {
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId !== 0) return;
+
   delete wereAdsFound[details.tabId];
   hosts[details.tabId] = getHost(details.url);
   syncTabIcon(details.tabId, details.url);
@@ -161,6 +244,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.shouldInit && tab) {
     const parentHost = getHost(tab.url);
     const isAllowlisted = !!getAllowlist()[parentHost];
+
     chrome.storage.sync.get('blocklist', (items) => {
       sendResponse({
         parentHost,
@@ -169,7 +253,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         wasGrantButtonPressed: !!state.wasGrantButtonPressed
       });
     });
+
     return true;
+  }
+
+  if (message.shouldSaveUser) {
+    sendResponse({});
+    return false;
   }
 
   if (message.wereAdsFound && tab) {
@@ -178,10 +268,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   sendResponse({});
+  return false;
 });
 
 actionApi.onClicked.addListener((tab) => {
   toggleAllowlistForTab(tab);
+});
+
+chrome.notifications.onClicked.addListener(() => {
+  chrome.tabs.create({ url: `${path}markup/experimental-tab.html` });
 });
 
 initialize();
